@@ -19,17 +19,19 @@ export default function EnablePushButton() {
       applicationServerKey: toKey(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!)
     });
 
-    await fetch("/api/push/send", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        subscription: sub,
-        title: "Willkommen, Navid 👋",
-        body: "Push läuft. Als Nächstes: täglicher Mentor-Push."
-      })
-    });
+await fetch("/api/push/send", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    subscription: sub,
+    title: "Willkommen, Navid 👋",
+    body: "Dein Mentor-Push ist bereit. Test folgt in Kürze."
+  })
+});
 
-    prompt("Kopiere deine Subscription:", JSON.stringify(sub));
+// iOS Fix – zeigt Erfolgsmeldung an
+console.log("Subscription:", JSON.stringify(sub));
+alert("✅ Push aktiviert! Deine Subscription wurde gespeichert (Konsole zeigt Details).");
   }
 
   return <button onClick={enablePush}>🔔 Push aktivieren</button>;
