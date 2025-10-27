@@ -84,8 +84,15 @@ export default function EnablePushButton() {
 function toKey(v: string) {
   const p = "=".repeat((4 - (v.length % 4)) % 4);
   const s = (v + p).replace(/-/g, "+").replace(/_/g, "/");
-  const r: string = atob(s);
-  const arr = new Uint8Array(r.length);
-  for (let i = 0; i < r.length; i++) arr[i] = r.charCodeAt(i);
-  return arr;
+  const raw = Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+
+  // Wenn Key bereits 65 Bytes → passt (richtiger „B“-Key)
+  if (raw.length === 65 && raw[0] === 0x04) return raw;
+
+  // Wenn Key SPKI (0x30 0x59 am Anfang, > 70 Bytes) → rohen Punkt extrahieren
+  if (raw.length > 70 && raw[0] === 0x30 && raw[1] === 0x59) {
+    return raw.slice(raw.length - 65);
+  }
+
+  throw new Error(`Ungültige Key-Länge (${raw.length})`);
 }
