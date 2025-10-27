@@ -35,9 +35,11 @@ export default function EnablePushButton() {
   return <button onClick={enablePush}>🔔 Push aktivieren</button>;
 }
 
-function toKey(v) {
+function toKey(v: string) {
   const p = "=".repeat((4 - (v.length % 4)) % 4);
   const s = (v + p).replace(/-/g, "+").replace(/_/g, "/");
-  const r = atob(s);
-  return Uint8Array.from([...r].map(c => c.charCodeAt(0)));
+  const r: string = atob(s);
+  const arr = new Uint8Array(r.length);
+  for (let i = 0; i < r.length; i++) arr[i] = r.charCodeAt(i);
+  return arr;
 }
