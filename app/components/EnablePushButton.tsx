@@ -2,53 +2,58 @@
 import { useEffect, useState } from "react";
 
 export default function EnablePushButton() {
-  const [log, setLog] = useState<string>("Bereit.");
+  const [log, setLog] = useState("Bereit.");
   const add = (m: string) => setLog((x) => x + "\n" + m);
 
   useEffect(() => {
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("/sw.js")
         .then(() => add("SW: registriert"))
-        .catch((e)=> add("SW-Fehler: " + (e?.message || e)));
-    } else {
-      add("Kein ServiceWorker Support.");
-    }
+        .catch((e) => add("SW-Fehler: " + (e?.message || e)));
+    } else add("Kein ServiceWorker-Support.");
   }, []);
 
   async function enablePush() {
     try {
       add("Starte Diagnose …");
 
-      // 1) Server/ENV check
+      // Public Key säubern + anzeigen
+      let pub = (process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || "")
+        .trim().replace(/^Public Key:\s*/i, "").replace(/\s+/g, "");
+      add(`PUB(prefix): ${pub.slice(0, 8)}…`);
+
+      // Server-Check
       const dbg = await fetch("/api/push/debug", { cache: "no-store" });
-      const dbgJson = await dbg.json();
-      if (!dbgJson.env?.pub || !dbgJson.env?.priv) {
-        alert("❗️VAPID Keys fehlen auf dem Server. Bitte in Vercel setzen.");
-        add("ENV fehlt auf Server.");
-        return;
-      }
+      const d = await dbg.json();
+      if (!d?.env?.pub || !d?.env?.priv || !d?.env?.vapidOk)
+        throw new Error("Server-ENV unvollständig.");
       add("Server/ENV: OK");
 
-      // 2) Permission
-      if (!("Notification" in window)) { alert("Dieser Modus unterstützt keine Notifications."); return; }
+      // Permission
       const perm = await Notification.requestPermission();
       add("Permission: " + perm);
-      if (perm !== "granted") { alert("Benachrichtigungen blockiert."); return; }
+      if (perm !== "granted") throw new Error("Benachrichtigungen blockiert.");
 
-      // 3) Subscribe
       const reg = await navigator.serviceWorker.ready;
-      const pub = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
-      if (!pub) { alert("❗️NEXT_PUBLIC_VAPID_PUBLIC_KEY fehlt (Client)."); return; }
+
+      // Altes Abo entfernen
+      const old = await reg.pushManager.getSubscription();
+      if (old) { await old.unsubscribe(); add("Altes Abo entfernt."); }
+
+      // Key prüfen
+      const keyBytes = toKey(pub);
+      add(`KeyLen: ${keyBytes.length} Bytes`);
+      if (keyBytes.length !== 65)
+        throw new Error("Key-Länge ≠ 65 Bytes → falsches Format");
+
+      // Neues Abo
       const sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: toKey(pub)
+        applicationServerKey: keyBytes,
       });
       add("Subscribed: OK");
 
-      const subJson = JSON.stringify(sub);
-      add("Subscription:\n" + subJson);
-
-      // 4) Sofort-Push-Test
+      // Test-Push
       const res = await fetch("/api/push/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -56,25 +61,22 @@ export default function EnablePushButton() {
           subscription: sub,
           title: "Guten Morgen, Navid 🌅",
           body: "Mentor-Push aktiv. Kleine Schritte – großer Effekt.",
-          url: "/"
-        })
+          url: "/",
+        }),
       });
-      if (!res.ok) {
-        const t = await res.text();
-        throw new Error("Serverantwort: " + t);
-      }
+      if (!res.ok) throw new Error("Server: " + (await res.text()));
       add("Server: Push gesendet ✅");
       alert("✅ Push gesendet! Schau auf deinen Bildschirm.");
     } catch (e: any) {
-      alert("❗️Fehler: " + (e?.message || e));
       add("Fehler: " + (e?.message || String(e)));
+      alert("❗️Fehler: " + (e?.message || e));
     }
   }
 
   return (
-    <div style={{display:"grid", gap:12}}>
+    <div style={{ display: "grid", gap: 12 }}>
       <button onClick={enablePush}>🔔 Push aktivieren</button>
-      <pre style={{whiteSpace:"pre-wrap", fontSize:12, background:"#1112", padding:8, borderRadius:8}}>{log}</pre>
+      <pre style={{ whiteSpace: "pre-wrap", fontSize: 12, background: "#1112", padding: 8, borderRadius: 8 }}>{log}</pre>
     </div>
   );
 }
