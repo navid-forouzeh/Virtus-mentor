@@ -1,10 +1,10 @@
-// sw v5
+// sw v6
 self.addEventListener("push", (event) => {
   const d = event.data?.json() || {};
   event.waitUntil(
-    self.registration.showNotification(d.title || "Virtus", {
+    self.registration.showNotification(d.title || "Virtus Mentor", {
       body: d.body || "",
-      data: d.data || {},
+      data: d.data || { url: d.url || "/" },
     })
   );
 });
