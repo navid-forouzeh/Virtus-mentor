@@ -17,43 +17,48 @@ export default function EnablePushButton() {
     try {
       add("Starte Diagnose …");
 
-      // Public Key säubern + anzeigen
+      // 0) PUBLIC KEY laden (ENV) + säubern
       let pub = (process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || "")
-        .trim().replace(/^Public Key:\s*/i, "").replace(/\s+/g, "");
+        .trim()
+        .replace(/^Public Key:\s*/i, "")
+        .replace(/\s+/g, "");
       add(`PUB(prefix): ${pub.slice(0, 8)}…`);
 
-      // Server-Check
+      // 1) Server/ENV prüfen
       const dbg = await fetch("/api/push/debug", { cache: "no-store" });
       const d = await dbg.json();
-      if (!d?.env?.pub || !d?.env?.priv || !d?.env?.vapidOk)
-        throw new Error("Server-ENV unvollständig.");
+      if (!d?.env?.pub || !d?.env?.priv || !d?.env?.vapidOk) {
+        throw new Error("ENV fehlt auf Server.");
+      }
       add("Server/ENV: OK");
 
-      // Permission
+      // 2) Permission
       const perm = await Notification.requestPermission();
       add("Permission: " + perm);
       if (perm !== "granted") throw new Error("Benachrichtigungen blockiert.");
 
+      // 3) SW bereit
       const reg = await navigator.serviceWorker.ready;
 
-      // Altes Abo entfernen
+      // 4) altes Abo entfernen
       const old = await reg.pushManager.getSubscription();
-      if (old) { await old.unsubscribe(); add("Altes Abo entfernt."); }
+      if (old) { try { await old.unsubscribe(); add("Altes Abo entfernt."); } catch {} }
 
-      // Key prüfen
+      // 5) Key konvertieren (akzeptiert B-Key *oder* MFkw… SPKI)
       const keyBytes = toKey(pub);
       add(`KeyLen: ${keyBytes.length} Bytes`);
-      if (keyBytes.length !== 65)
-        throw new Error("Key-Länge ≠ 65 Bytes → falsches Format");
+      if (keyBytes.length !== 65 || keyBytes[0] !== 0x04) {
+        throw new Error("applicationServerKey must contain a valid P-256 public key");
+      }
 
-      // Neues Abo
+      // 6) neues Abo
       const sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: keyBytes,
       });
       add("Subscribed: OK");
 
-      // Test-Push
+      // 7) Test-Push senden
       const res = await fetch("/api/push/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -81,17 +86,22 @@ export default function EnablePushButton() {
   );
 }
 
+/** akzeptiert:
+ *  - B… (roher P-256 Punkt, 65 Bytes, 0x04 | X(32) | Y(32))
+ *  - MFkw… (SPKI DER) → extrahiert letzten 65 Bytes
+ */
 function toKey(v: string) {
   const p = "=".repeat((4 - (v.length % 4)) % 4);
   const s = (v + p).replace(/-/g, "+").replace(/_/g, "/");
   const raw = Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 
-  // Wenn Key bereits 65 Bytes → passt (richtiger „B“-Key)
+  // B-Key (raw) → direkt
   if (raw.length === 65 && raw[0] === 0x04) return raw;
 
-  // Wenn Key SPKI (0x30 0x59 am Anfang, > 70 Bytes) → rohen Punkt extrahieren
-  if (raw.length > 70 && raw[0] === 0x30 && raw[1] === 0x59) {
-    return raw.slice(raw.length - 65);
+  // SPKI (ASN.1 SEQUENCE 0x30 …) → ECPoint am Ende (65 Bytes)
+  if (raw.length > 70 && raw[0] === 0x30) {
+    const last65 = raw.slice(raw.length - 65);
+    if (last65[0] === 0x04) return last65;
   }
 
   throw new Error(`Ungültige Key-Länge (${raw.length})`);
